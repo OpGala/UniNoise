@@ -1,223 +1,345 @@
+using System.Collections.Generic;
 using System.Diagnostics;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
-using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
 
 namespace UniNoise
 {
-    [ExecuteInEditMode]
-    public sealed class NoiseGenerator : MonoBehaviour
-    {
-        public NoiseType noiseType = NoiseType.Perlin;
-        public int seed = 42;
-        public float scale = 1.0f;
-        public int width = 256;
-        public int height = 256;
-        public float lacunarity = 2.0f;
-        public float gain = 0.5f;
-        public int octaves = 4;
-        public int numCells = 64;
-        public float jitter = 1.0f;
-        public DistanceFunction distanceFunction = DistanceFunction.Euclidean;
-        public int numberOfFeatures = 1;
-        public float amplitude = 1.0f;
-        public float frequency = 1.0f;
-        public float bias;
-        public int kernelSize = 3;
-        public float orientation;
-        public float aspectRatio = 1.0f;
-        public float phase;
-        public float2 offset = new float2(0.0f, 0.0f);
-        internal Texture2D NoiseTexture;
-        internal string GenerationTime = "";
+          [ExecuteInEditMode]
+          public sealed class NoiseGenerator : MonoBehaviour
+          {
+                    public CombinedNoiseConfiguration combinedNoiseConfig;
+                    internal Texture2D NoiseTexture;
+                    internal string GenerationTime = "";
 
-        private NativeArray<float> _noiseValuesNative;
-        private NativeArray<Color> _colorsNative;
-        private bool _arraysInitialized;
+                    private NativeArray<float> _noiseValuesNative;
+                    private NativeArray<Color> _colorsNative;
+                    private bool _arraysInitialized;
 
-        private void OnValidate()
-        {
-            GenerateNoiseTexture();
-        }
+                    private void OnValidate()
+                    {
+                              GenerateNoiseTexture();
+                    }
 
-        private void OnDestroy()
-        {
-            Dispose();
-        }
+                    private void OnDestroy()
+                    {
+                              Dispose();
+                    }
 
-        private void Dispose()
-        {
-            if (!_arraysInitialized) return;
-            if (_noiseValuesNative.IsCreated)
-                _noiseValuesNative.Dispose();
-            if (_colorsNative.IsCreated)
-                _colorsNative.Dispose();
-            _arraysInitialized = false;
-        }
+                    private void Dispose()
+                    {
+                              if (!_arraysInitialized) return;
+                              if (_noiseValuesNative.IsCreated)
+                                        _noiseValuesNative.Dispose();
+                              if (_colorsNative.IsCreated)
+                                        _colorsNative.Dispose();
+                              _arraysInitialized = false;
+                    }
 
-        private void InitializeArrays()
-        {
-            if (_arraysInitialized && _noiseValuesNative.Length == width * height) return;
-            if (_noiseValuesNative.IsCreated)
-                _noiseValuesNative.Dispose();
-            if (_colorsNative.IsCreated)
-                _colorsNative.Dispose();
+                    private void InitializeArrays()
+                    {
+                              if (_arraysInitialized && _noiseValuesNative.Length ==
+                                  combinedNoiseConfig.noiseConfigurations[0].width *
+                                  combinedNoiseConfig.noiseConfigurations[0].height) return;
+                              if (_noiseValuesNative.IsCreated)
+                                        _noiseValuesNative.Dispose();
+                              if (_colorsNative.IsCreated)
+                                        _colorsNative.Dispose();
 
-            _noiseValuesNative = new NativeArray<float>(width * height, Allocator.Persistent);
-            _colorsNative = new NativeArray<Color>(width * height, Allocator.Persistent);
-            _arraysInitialized = true;
-        }
+                              _noiseValuesNative = new NativeArray<float>(
+                                                  combinedNoiseConfig.noiseConfigurations[0].width *
+                                                  combinedNoiseConfig.noiseConfigurations[0].height,
+                                                  Allocator.Persistent);
+                              _colorsNative = new NativeArray<Color>(
+                                                  combinedNoiseConfig.noiseConfigurations[0].width *
+                                                  combinedNoiseConfig.noiseConfigurations[0].height,
+                                                  Allocator.Persistent);
+                              _arraysInitialized = true;
+                    }
 
-        [BurstCompile]
-        private struct GenerateTextureJob : IJobParallelFor
-        {
-            [ReadOnly] public NativeArray<float> NoiseValues;
-            public NativeArray<Color> Colors;
+                    [BurstCompile]
+                    private struct GenerateTextureJob : IJobParallelFor
+                    {
+                              [ReadOnly] public NativeArray<float> NoiseValues;
+                              public NativeArray<Color> Colors;
 
-            public void Execute(int index)
-            {
-                float value = NoiseValues[index];
-                Colors[index] = new Color(value, value, value);
-            }
-        }
+                              public void Execute(int index)
+                              {
+                                        float value = NoiseValues[index];
+                                        Colors[index] = new Color(value, value, value);
+                              }
+                    }
 
-        public void GenerateNoiseTexture()
-        {
-            if (width <= 0 || height <= 0) return;
+                    public void GenerateNoiseTexture()
+                    {
+                              if (combinedNoiseConfig.noiseConfigurations.Count == 0 ||
+                                  combinedNoiseConfig.noiseConfigurations[0].width <= 0 ||
+                                  combinedNoiseConfig.noiseConfigurations[0].height <= 0) return;
 
-            InitializeArrays();
+                              InitializeArrays();
 
-            var stopwatch = new Stopwatch();
-            stopwatch.Start();
+                              var stopwatch = new Stopwatch();
+                              stopwatch.Start();
 
-            float[] noiseValues = Noise.GetNoise(
-                noiseType, seed, width, height, scale, octaves, lacunarity, gain, 
-                gain, amplitude, frequency, bias, numCells, jitter, distanceFunction, 
-                numberOfFeatures, orientation, aspectRatio, phase, kernelSize, offset
-            );
+                              var noiseValuesList = new List<float[]>();
+                              foreach (NoiseConfiguration config in combinedNoiseConfig.noiseConfigurations)
+                              {
+                                        float[] noiseValues = Noise.GetNoise(
+                                                            config.noiseType, config.seed, config.width, config.height,
+                                                            config.scale, config.octaves, config.lacunarity,
+                                                            config.gain,
+                                                            config.gain, config.amplitude, config.frequency,
+                                                            config.bias, config.numCells, config.jitter,
+                                                            config.distanceFunction,
+                                                            config.numberOfFeatures, config.orientation,
+                                                            config.aspectRatio, config.phase, config.kernelSize,
+                                                            config.offset
+                                        );
+                                        noiseValuesList.Add(noiseValues);
+                              }
 
-            _noiseValuesNative.CopyFrom(noiseValues);
+                              float[] combinedNoiseValues =
+                                                  Noise.CombineNoise(combinedNoiseConfig.combineMethod,
+                                                                      noiseValuesList.ToArray());
+                              _noiseValuesNative.CopyFrom(combinedNoiseValues);
 
-            stopwatch.Stop();
-            double microseconds = stopwatch.ElapsedTicks * (1000000.0 / Stopwatch.Frequency);
-            GenerationTime = $"Generation time: {microseconds:F2} µs";
+                              stopwatch.Stop();
+                              double microseconds = stopwatch.ElapsedTicks * (1000000.0 / Stopwatch.Frequency);
+                              GenerationTime = $"Generation time: {microseconds:F2} µs";
 
-            var generateTextureJob = new GenerateTextureJob
-            {
-                NoiseValues = _noiseValuesNative,
-                Colors = _colorsNative
-            };
+                              var generateTextureJob = new GenerateTextureJob
+                              {
+                                                  NoiseValues = _noiseValuesNative,
+                                                  Colors = _colorsNative
+                              };
 
-            JobHandle jobHandle = generateTextureJob.Schedule(width * height, 64);
-            jobHandle.Complete();
+                              JobHandle jobHandle = generateTextureJob.Schedule(
+                                                  combinedNoiseConfig.noiseConfigurations[0].width *
+                                                  combinedNoiseConfig.noiseConfigurations[0].height, 64);
+                              jobHandle.Complete();
 
-            NoiseTexture = new Texture2D(width, height, TextureFormat.RGB24, false);
-            NoiseTexture.SetPixels(_colorsNative.ToArray());
-            NoiseTexture.Apply();
-        }
-    }
+                              NoiseTexture = new Texture2D(combinedNoiseConfig.noiseConfigurations[0].width,
+                                                  combinedNoiseConfig.noiseConfigurations[0].height,
+                                                  TextureFormat.RGB24, false);
+                              NoiseTexture.SetPixels(_colorsNative.ToArray());
+                              NoiseTexture.Apply();
+                    }
+          }
 
-    [CustomEditor(typeof(NoiseGenerator))]
-    public sealed class NoiseGeneratorEditor : Editor
-    {
-        public override void OnInspectorGUI()
-        {
-            var generator = (NoiseGenerator)target;
+          [CustomEditor(typeof(NoiseGenerator))]
+          public sealed class NoiseGeneratorEditor : Editor
+          {
+                    public override void OnInspectorGUI()
+                    {
+                              var generator = (NoiseGenerator)target;
 
-            // Draw Noise Type field
-            generator.noiseType = (NoiseType)EditorGUILayout.EnumPopup("Noise Type", generator.noiseType);
+                              if (GUILayout.Button("Add Noise Configuration"))
+                              {
+                                        generator.combinedNoiseConfig.noiseConfigurations.Add(new NoiseConfiguration());
+                              }
 
-            // Draw common fields
-            generator.seed = EditorGUILayout.IntField("Seed", generator.seed);
-            generator.width = EditorGUILayout.IntField("Width", generator.width);
-            generator.height = EditorGUILayout.IntField("Height", generator.height);
+                              for (int i = 0; i < generator.combinedNoiseConfig.noiseConfigurations.Count; i++)
+                              {
+                                        GUILayout.Label($"Noise Configuration {i + 1}", EditorStyles.boldLabel);
+                                        NoiseConfiguration config =
+                                                            generator.combinedNoiseConfig.noiseConfigurations[i];
 
-            switch (generator.noiseType)
-            {
-                // Draw specific fields based on noise type
-                case NoiseType.Perlin:
-                    generator.scale = EditorGUILayout.FloatField("Scale", generator.scale);
-                    break;
-                case NoiseType.PerlinFractal:
-                    generator.scale = EditorGUILayout.FloatField("Scale", generator.scale);
-                    generator.lacunarity = EditorGUILayout.FloatField("Lacunarity", generator.lacunarity);
-                    generator.gain = EditorGUILayout.FloatField("Gain", generator.gain);
-                    generator.octaves = EditorGUILayout.IntField("Octaves", generator.octaves);
-                    break;
-                case NoiseType.Worley:
-                    generator.numCells = EditorGUILayout.IntField("Number of Cells", generator.numCells);
-                    generator.scale = EditorGUILayout.FloatField("Scale", generator.scale);
-                    generator.jitter = EditorGUILayout.FloatField("Jitter", generator.jitter);
-                    generator.distanceFunction = (DistanceFunction)EditorGUILayout.EnumPopup("Distance Function", generator.distanceFunction);
-                    generator.numberOfFeatures = EditorGUILayout.IntField("Number of Features", generator.numberOfFeatures);
-                    break;
-                case NoiseType.Simplex:
-                    generator.scale = EditorGUILayout.FloatField("Scale", generator.scale);
-                    break;
-                case NoiseType.SimplexFractal:
-                    generator.scale = EditorGUILayout.FloatField("Scale", generator.scale);
-                    generator.octaves = EditorGUILayout.IntField("Octaves", generator.octaves);
-                    generator.lacunarity = EditorGUILayout.FloatField("Lacunarity", generator.lacunarity);
-                    generator.gain = EditorGUILayout.FloatField("Persistence", generator.gain);
-                    generator.amplitude = EditorGUILayout.FloatField("Amplitude", generator.amplitude);
-                    generator.frequency = EditorGUILayout.FloatField("Frequency", generator.frequency);
-                    break;
-                case NoiseType.White:
-                    generator.amplitude = EditorGUILayout.FloatField("Amplitude", generator.amplitude);
-                    generator.bias = EditorGUILayout.FloatField("Bias", generator.bias);
-                    break;
-                case NoiseType.Value:
-                    generator.scale = EditorGUILayout.FloatField("Scale", generator.scale);
-                    generator.octaves = EditorGUILayout.IntField("Octaves", generator.octaves);
-                    generator.lacunarity = EditorGUILayout.FloatField("Lacunarity", generator.lacunarity);
-                    generator.gain = EditorGUILayout.FloatField("Persistence", generator.gain);
-                    break;
-                case NoiseType.Wavelet:
-                    generator.scale = EditorGUILayout.FloatField("Scale", generator.scale);
-                    generator.octaves = EditorGUILayout.IntField("Octaves", generator.octaves);
-                    generator.lacunarity = EditorGUILayout.FloatField("Lacunarity", generator.lacunarity);
-                    generator.gain = EditorGUILayout.FloatField("Persistence", generator.gain);
-                    break;
-                case NoiseType.Gabor:
-                    generator.scale = EditorGUILayout.FloatField("Scale", generator.scale);
-                    generator.frequency = EditorGUILayout.FloatField("Frequency", generator.frequency);
-                    generator.orientation = EditorGUILayout.FloatField("Orientation", generator.orientation);
-                    generator.aspectRatio = EditorGUILayout.FloatField("Aspect Ratio", generator.aspectRatio);
-                    generator.phase = EditorGUILayout.FloatField("Phase", generator.phase);
-                    generator.amplitude = EditorGUILayout.FloatField("Amplitude", generator.amplitude);
-                    break;
-                case NoiseType.SparseConvolution:
-                    generator.scale = EditorGUILayout.FloatField("Scale", generator.scale);
-                    generator.kernelSize = EditorGUILayout.IntField("Kernel Size", generator.kernelSize);
-                    break;
-                case NoiseType.Gradient:
-                    generator.scale = EditorGUILayout.FloatField("Scale", generator.scale);
-                    generator.amplitude = EditorGUILayout.FloatField("Amplitude", generator.amplitude);
-                    generator.frequency = EditorGUILayout.FloatField("Frequency", generator.frequency);
-                    generator.offset = EditorGUILayout.Vector2Field("Offset", generator.offset);
-                    break;
-                case NoiseType.Fractal:
-                    generator.scale = EditorGUILayout.FloatField("Scale", generator.scale);
-                    generator.octaves = EditorGUILayout.IntField("Octaves", generator.octaves);
-                    generator.lacunarity = EditorGUILayout.FloatField("Lacunarity", generator.lacunarity);
-                    generator.gain = EditorGUILayout.FloatField("Persistence", generator.gain);
-                    break;
-            }
+                                        config.noiseType =
+                                                            (NoiseType)EditorGUILayout.EnumPopup("Noise Type",
+                                                                                config.noiseType);
+                                        config.seed = EditorGUILayout.IntField("Seed", config.seed);
+                                        config.width = EditorGUILayout.IntField("Width", config.width);
+                                        config.height = EditorGUILayout.IntField("Height", config.height);
 
-            if (GUILayout.Button("Generate Noise Texture"))
-            {
-                generator.GenerateNoiseTexture();
-            }
+                                        switch (config.noiseType)
+                                        {
+                                                  case NoiseType.Perlin:
+                                                            config.scale =
+                                                                                EditorGUILayout.FloatField("Scale",
+                                                                                                    config.scale);
+                                                            break;
+                                                  case NoiseType.PerlinFractal:
+                                                            config.scale =
+                                                                                EditorGUILayout.FloatField("Scale",
+                                                                                                    config.scale);
+                                                            config.lacunarity = EditorGUILayout.FloatField("Lacunarity",
+                                                                                config.lacunarity);
+                                                            config.gain =
+                                                                                EditorGUILayout.FloatField("Gain",
+                                                                                                    config.gain);
+                                                            config.octaves =
+                                                                                EditorGUILayout.IntField("Octaves",
+                                                                                                    config.octaves);
+                                                            break;
+                                                  case NoiseType.Worley:
+                                                            config.numCells =
+                                                                                EditorGUILayout.IntField(
+                                                                                                    "Number of Cells",
+                                                                                                    config.numCells);
+                                                            config.scale =
+                                                                                EditorGUILayout.FloatField("Scale",
+                                                                                                    config.scale);
+                                                            config.jitter =
+                                                                                EditorGUILayout.FloatField("Jitter",
+                                                                                                    config.jitter);
+                                                            config.distanceFunction =
+                                                                                (DistanceFunction)EditorGUILayout
+                                                                                                    .EnumPopup(
+                                                                                                                        "Distance Function",
+                                                                                                                        config
+                                                                                                                                            .distanceFunction);
+                                                            config.numberOfFeatures =
+                                                                                EditorGUILayout.IntField(
+                                                                                                    "Number of Features",
+                                                                                                    config
+                                                                                                                        .numberOfFeatures);
+                                                            break;
+                                                  case NoiseType.Simplex:
+                                                            config.scale =
+                                                                                EditorGUILayout.FloatField("Scale",
+                                                                                                    config.scale);
+                                                            break;
+                                                  case NoiseType.SimplexFractal:
+                                                            config.scale =
+                                                                                EditorGUILayout.FloatField("Scale",
+                                                                                                    config.scale);
+                                                            config.octaves =
+                                                                                EditorGUILayout.IntField("Octaves",
+                                                                                                    config.octaves);
+                                                            config.lacunarity = EditorGUILayout.FloatField("Lacunarity",
+                                                                                config.lacunarity);
+                                                            config.gain =
+                                                                                EditorGUILayout.FloatField(
+                                                                                                    "Persistence",
+                                                                                                    config.gain);
+                                                            config.amplitude =
+                                                                                EditorGUILayout.FloatField("Amplitude",
+                                                                                                    config.amplitude);
+                                                            config.frequency =
+                                                                                EditorGUILayout.FloatField("Frequency",
+                                                                                                    config.frequency);
+                                                            break;
+                                                  case NoiseType.White:
+                                                            config.amplitude =
+                                                                                EditorGUILayout.FloatField("Amplitude",
+                                                                                                    config.amplitude);
+                                                            config.bias =
+                                                                                EditorGUILayout.FloatField("Bias",
+                                                                                                    config.bias);
+                                                            break;
+                                                  case NoiseType.Value:
+                                                            config.scale =
+                                                                                EditorGUILayout.FloatField("Scale",
+                                                                                                    config.scale);
+                                                            config.octaves =
+                                                                                EditorGUILayout.IntField("Octaves",
+                                                                                                    config.octaves);
+                                                            config.lacunarity = EditorGUILayout.FloatField("Lacunarity",
+                                                                                config.lacunarity);
+                                                            config.gain =
+                                                                                EditorGUILayout.FloatField(
+                                                                                                    "Persistence",
+                                                                                                    config.gain);
+                                                            break;
+                                                  case NoiseType.Wavelet:
+                                                            config.scale =
+                                                                                EditorGUILayout.FloatField("Scale",
+                                                                                                    config.scale);
+                                                            config.octaves =
+                                                                                EditorGUILayout.IntField("Octaves",
+                                                                                                    config.octaves);
+                                                            config.lacunarity = EditorGUILayout.FloatField("Lacunarity",
+                                                                                config.lacunarity);
+                                                            config.gain =
+                                                                                EditorGUILayout.FloatField(
+                                                                                                    "Persistence",
+                                                                                                    config.gain);
+                                                            break;
+                                                  case NoiseType.Gabor:
+                                                            config.scale =
+                                                                                EditorGUILayout.FloatField("Scale",
+                                                                                                    config.scale);
+                                                            config.frequency =
+                                                                                EditorGUILayout.FloatField("Frequency",
+                                                                                                    config.frequency);
+                                                            config.orientation =
+                                                                                EditorGUILayout.FloatField(
+                                                                                                    "Orientation",
+                                                                                                    config.orientation);
+                                                            config.aspectRatio =
+                                                                                EditorGUILayout.FloatField(
+                                                                                                    "Aspect Ratio",
+                                                                                                    config.aspectRatio);
+                                                            config.phase =
+                                                                                EditorGUILayout.FloatField("Phase",
+                                                                                                    config.phase);
+                                                            config.amplitude =
+                                                                                EditorGUILayout.FloatField("Amplitude",
+                                                                                                    config.amplitude);
+                                                            break;
+                                                  case NoiseType.SparseConvolution:
+                                                            config.scale =
+                                                                                EditorGUILayout.FloatField("Scale",
+                                                                                                    config.scale);
+                                                            config.kernelSize = EditorGUILayout.IntField("Kernel Size",
+                                                                                config.kernelSize);
+                                                            break;
+                                                  case NoiseType.Gradient:
+                                                            config.scale =
+                                                                                EditorGUILayout.FloatField("Scale",
+                                                                                                    config.scale);
+                                                            config.amplitude =
+                                                                                EditorGUILayout.FloatField("Amplitude",
+                                                                                                    config.amplitude);
+                                                            config.frequency =
+                                                                                EditorGUILayout.FloatField("Frequency",
+                                                                                                    config.frequency);
+                                                            config.offset =
+                                                                                EditorGUILayout.Vector2Field("Offset",
+                                                                                                    config.offset);
+                                                            break;
+                                                  case NoiseType.Fractal:
+                                                            config.scale =
+                                                                                EditorGUILayout.FloatField("Scale",
+                                                                                                    config.scale);
+                                                            config.octaves =
+                                                                                EditorGUILayout.IntField("Octaves",
+                                                                                                    config.octaves);
+                                                            config.lacunarity = EditorGUILayout.FloatField("Lacunarity",
+                                                                                config.lacunarity);
+                                                            config.gain =
+                                                                                EditorGUILayout.FloatField(
+                                                                                                    "Persistence",
+                                                                                                    config.gain);
+                                                            break;
+                                        }
 
-            if (generator.NoiseTexture != null)
-            {
-                GUILayout.Label(generator.NoiseTexture);
-            }
+                                        if (GUILayout.Button("Remove Noise Configuration"))
+                                        {
+                                                  generator.combinedNoiseConfig.noiseConfigurations.RemoveAt(i);
+                                        }
 
-            GUILayout.Label(generator.GenerationTime);
-        }
-    }
+                                        GUILayout.Space(10);
+                              }
+
+                              generator.combinedNoiseConfig.combineMethod =
+                                                  (CombineMethod)EditorGUILayout.EnumPopup("Combine Method",
+                                                                      generator.combinedNoiseConfig.combineMethod);
+
+                              if (GUILayout.Button("Generate Noise Texture"))
+                              {
+                                        generator.GenerateNoiseTexture();
+                              }
+
+                              if (generator.NoiseTexture != null)
+                              {
+                                        GUILayout.Label(generator.NoiseTexture);
+                              }
+
+                              GUILayout.Label(generator.GenerationTime);
+                    }
+          }
 }
