@@ -6,210 +6,136 @@ using Random = Unity.Mathematics.Random;
 
 namespace UniNoise.Noises
 {
-          public sealed class PerlinNoise : System.IDisposable
-          {
-                    private readonly int _seed;
-                    private readonly float _scale;
-                    private readonly int _width;
-                    private readonly int _height;
+        public static class PerlinNoise
+        {
+                public static float[] Generate2D(int width, int height, float scale, int seed, float2 offset, int octaves, float persistence, float lacunarity)
+                {
+                        var noiseMap = new NativeArray<float>(width * height, Allocator.TempJob);
+                        var noiseJob = new Generate2DNoiseJob
+                        {
+                                        Width = width,
+                                        Height = height,
+                                        Scale = scale,
+                                        Offset = offset,
+                                        Octaves = octaves,
+                                        Persistence = persistence,
+                                        Lacunarity = lacunarity,
+                                        NoiseMap = noiseMap,
+                                        Permutation = GeneratePermutation(seed)
+                        };
 
-                    private NativeArray<float> _noiseValuesNative;
-                    private NativeArray<int> _permutationTable;
-                    private NativeArray<float2> _gradients;
-                    private bool _arraysInitialized;
+                        JobHandle jobHandle = noiseJob.Schedule(width * height, 64);
+                        jobHandle.Complete();
 
-                    public PerlinNoise(int seed, float scale, int width, int height)
-                    {
-                              _seed = seed;
-                              _scale = scale;
-                              _width = width;
-                              _height = height;
-                              InitializeArrays();
-                              GeneratePermutationTable();
-                              GenerateGradients();
-                    }
+                        float[] noiseArray = noiseMap.ToArray();
+                        noiseMap.Dispose();
+                        noiseJob.Permutation.Dispose();
+                        return noiseArray;
+                }
 
-                    private void InitializeArrays()
-                    {
-                              if (!_arraysInitialized)
-                              {
-                                        _noiseValuesNative =
-                                                            new NativeArray<float>(_width * _height,
-                                                                                Allocator.Persistent);
-                                        _permutationTable = new NativeArray<int>(512, Allocator.Persistent);
-                                        _gradients = new NativeArray<float2>(512, Allocator.Persistent);
-                                        _arraysInitialized = true;
-                              }
-                              else if (_noiseValuesNative.Length != _width * _height)
-                              {
-                                        _noiseValuesNative.Dispose();
-                                        _noiseValuesNative =
-                                                            new NativeArray<float>(_width * _height,
-                                                                                Allocator.Persistent);
-                              }
-                    }
+                private static NativeArray<int> GeneratePermutation(int seed)
+                {
+                        var random = new Random((uint)seed);
+                        var permutation = new NativeArray<int>(512, Allocator.TempJob);
+                        for (int i = 0; i < 256; i++)
+                        {
+                                permutation[i] = i;
+                        }
 
+                        for (int i = 0; i < 256; i++)
+                        {
+                                int j = random.NextInt(256);
+                                (permutation[i], permutation[j]) = (permutation[j], permutation[i]);
+                        }
 
-                    private void GeneratePermutationTable()
-                    {
-                              var job = new PermutationTableJob
-                              {
-                                                  PermutationTable = _permutationTable,
-                                                  Seed = _seed
-                              };
+                        for (int i = 0; i < 256; i++)
+                        {
+                                permutation[256 + i] = permutation[i];
+                        }
 
-                              JobHandle jobHandle = job.Schedule();
-                              jobHandle.Complete();
-                    }
+                        return permutation;
+                }
 
-                    private void GenerateGradients()
-                    {
-                              var job = new GradientsJob
-                              {
-                                                  Gradients = _gradients,
-                                                  Seed = _seed
-                              };
+                [BurstCompile]
+                private struct Generate2DNoiseJob : IJobParallelFor
+                {
+                        public int Width;
+                        public int Height;
+                        public float Scale;
+                        public float2 Offset;
+                        public int Octaves;
+                        public float Persistence;
+                        public float Lacunarity;
+                        public NativeArray<float> NoiseMap;
+                        [ReadOnly] public NativeArray<int> Permutation;
 
-                              JobHandle jobHandle = job.Schedule();
-                              jobHandle.Complete();
-                    }
+                        public void Execute(int index)
+                        {
+                                int x = index % Width;
+                                int y = index / Width;
 
-                    [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
-                    private struct PermutationTableJob : IJob
-                    {
-                              public NativeArray<int> PermutationTable;
-                              public int Seed;
+                                float amplitude = 1;
+                                float frequency = 1;
+                                float noiseHeight = 0;
+                                float maxValue = 0; // Normalization factor
 
-                              public void Execute()
-                              {
-                                        var random = new Random((uint)Seed);
-                                        var p = new NativeArray<int>(256, Allocator.Temp);
-                                        for (int i = 0; i < 256; i++)
-                                        {
-                                                  p[i] = i;
-                                        }
+                                for (int i = 0; i < Octaves; i++)
+                                {
+                                        float xCoord = (x / (float)Width) * Scale * frequency + Offset.x;
+                                        float yCoord = (y / (float)Height) * Scale * frequency + Offset.y;
 
-                                        for (int i = 255; i > 0; i--)
-                                        {
-                                                  int j = random.NextInt(0, i + 1);
-                                                  (p[i], p[j]) = (p[j], p[i]);
-                                        }
+                                        float perlinValue = ImprovedPerlinNoise(xCoord, yCoord, Permutation) * 2 - 1;
+                                        noiseHeight += perlinValue * amplitude;
 
-                                        for (int i = 0; i < 512; i++)
-                                        {
-                                                  PermutationTable[i] = p[i & 255];
-                                        }
+                                        maxValue += amplitude;
 
-                                        p.Dispose();
-                              }
-                    }
+                                        amplitude *= Persistence;
+                                        frequency *= Lacunarity;
+                                }
 
-                    [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
-                    private struct GradientsJob : IJob
-                    {
-                              public NativeArray<float2> Gradients;
-                              public int Seed;
+                                // Normalize the result
+                                noiseHeight = (noiseHeight / maxValue + 1) / 2;
+                                NoiseMap[index] = noiseHeight;
+                        }
 
-                              public void Execute()
-                              {
-                                        var random = new Random((uint)Seed);
-                                        for (int i = 0; i < 256; i++)
-                                        {
-                                                  float angle = random.NextFloat(0, 2 * math.PI);
-                                                  Gradients[i] = new float2(math.cos(angle), math.sin(angle));
-                                        }
+                        private static float ImprovedPerlinNoise(float x, float y, NativeArray<int> p)
+                        {
+                                int xx = (int)math.floor(x) & 255;
+                                int yy = (int)math.floor(y) & 255;
 
-                                        for (int i = 0; i < 512; i++)
-                                        {
-                                                  Gradients[i] = Gradients[i & 255];
-                                        }
-                              }
-                    }
+                                x -= math.floor(x);
+                                y -= math.floor(y);
 
-                    [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
-                    private struct PerlinNoiseJob : IJobParallelFor
-                    {
-                              [ReadOnly] public NativeArray<int> PermutationTable;
-                              [ReadOnly] public NativeArray<float2> Gradients;
-                              public NativeArray<float> NoiseValues;
-                              public float Scale;
-                              public int Width;
+                                float u = Fade(x);
+                                float v = Fade(y);
 
-                              public void Execute(int index)
-                              {
-                                        int x = index % Width;
-                                        int y = index / Width;
-                                        var point = new float2(x * Scale, y * Scale);
-                                        NoiseValues[index] = GeneratePerlinNoise(point);
-                              }
+                                int a = p[xx] + yy;
+                                int aa = p[a];
+                                int ab = p[a + 1];
+                                int b = p[xx + 1] + yy;
+                                int ba = p[b];
+                                int bb = p[b + 1];
 
-                              private float GeneratePerlinNoise(float2 point)
-                              {
-                                        int x0 = (int)math.floor(point.x);
-                                        int y0 = (int)math.floor(point.y);
-                                        int x1 = x0 + 1;
-                                        int y1 = y0 + 1;
+                                return Lerp(v, Lerp(u, Grad(p[aa], x, y), Grad(p[ba], x - 1, y)), Lerp(u, Grad(p[ab], x, y - 1), Grad(p[bb], x - 1, y - 1)));
+                        }
 
-                                        float2 g00 = Gradients[Hash(x0, y0)];
-                                        float2 g10 = Gradients[Hash(x1, y0)];
-                                        float2 g01 = Gradients[Hash(x0, y1)];
-                                        float2 g11 = Gradients[Hash(x1, y1)];
+                        private static float Fade(float t)
+                        {
+                                return t * t * t * (t * (t * 6 - 15) + 10);
+                        }
 
-                                        float2 f00 = point - new float2(x0, y0);
-                                        float2 f10 = point - new float2(x1, y0);
-                                        float2 f01 = point - new float2(x0, y1);
-                                        float2 f11 = point - new float2(x1, y1);
+                        private static float Lerp(float t, float a, float b)
+                        {
+                                return math.lerp(a, b, t);
+                        }
 
-                                        float n00 = math.dot(g00, f00);
-                                        float n10 = math.dot(g10, f10);
-                                        float n01 = math.dot(g01, f01);
-                                        float n11 = math.dot(g11, f11);
-
-                                        float sx = math.smoothstep(0, 1, f00.x);
-                                        float sy = math.smoothstep(0, 1, f00.y);
-
-                                        return math.lerp(math.lerp(n00, n10, sx), math.lerp(n01, n11, sx), sy);
-                              }
-
-
-                              private int Hash(int x, int y)
-                              {
-                                        return PermutationTable[(x + PermutationTable[y & 255]) & 255];
-                              }
-                    }
-
-                    public float[] Generate()
-                    {
-                              var perlinNoiseJob = new PerlinNoiseJob
-                              {
-                                                  PermutationTable = _permutationTable,
-                                                  Gradients = _gradients,
-                                                  NoiseValues = _noiseValuesNative,
-                                                  Scale = _scale,
-                                                  Width = _width
-                              };
-
-                              JobHandle jobHandle = perlinNoiseJob.Schedule(_width * _height, 64);
-                              jobHandle.Complete();
-
-                              float[] result = new float[_width * _height];
-                              _noiseValuesNative.CopyTo(result);
-
-                              return result;
-                    }
-
-                    public void Dispose()
-                    {
-                              if (!_arraysInitialized) return;
-                              _noiseValuesNative.Dispose();
-                              _permutationTable.Dispose();
-                              _gradients.Dispose();
-                              _arraysInitialized = false;
-                    }
-
-                    ~PerlinNoise()
-                    {
-                              Dispose();
-                    }
-          }
+                        private static float Grad(int hash, float x, float y)
+                        {
+                                int h = hash & 15;
+                                float u = h < 8 ? x : y;
+                                float v = h < 4 ? y : 0;
+                                return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
+                        }
+                }
+        }
 }
