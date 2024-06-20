@@ -56,6 +56,7 @@ The `NoiseGenerator` script demonstrates how to integrate various types of noise
 ## Future Development
 
 Currently working on a node-based editor for more intuitive noise configuration and combination.
+Some algorithms will be reworked (especially Perlin noise that will implement the "Improved" one and not the gradient one)
 
 ## How to Use
 
