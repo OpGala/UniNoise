@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -8,20 +9,22 @@ namespace UniNoise.Noises
 {
       public static class PerlinNoise
       {
+            [BurstCompile]
             public static float[] Generate2D(int width, int height, float scale, int seed, float2 offset, int octaves, float persistence, float lacunarity)
             {
                   var noiseMap = new NativeArray<float>(width * height, Allocator.TempJob);
+
                   var noiseJob = new Generate2DNoiseJob
                   {
-                        Width = width,
-                        Height = height,
-                        Scale = scale,
-                        Offset = offset,
-                        Octaves = octaves,
-                        Persistence = persistence,
-                        Lacunarity = lacunarity,
-                        NoiseMap = noiseMap,
-                        Permutation = GeneratePermutation(seed)
+                              Width = width,
+                              Height = height,
+                              Scale = scale,
+                              Offset = offset,
+                              Octaves = octaves,
+                              Persistence = persistence,
+                              Lacunarity = lacunarity,
+                              NoiseMap = noiseMap,
+                              Permutation = GeneratePermutation(seed)
                   };
 
                   JobHandle jobHandle = noiseJob.Schedule(width * height, 64);
@@ -33,18 +36,20 @@ namespace UniNoise.Noises
                   return noiseArray;
             }
 
+            [BurstCompile]
             private static NativeArray<int> GeneratePermutation(int seed)
             {
                   var random = new Random((uint)seed);
                   var permutation = new NativeArray<int>(512, Allocator.TempJob);
+
                   for (int i = 0; i < 256; i++)
                   {
                         permutation[i] = i;
                   }
 
-                  for (int i = 0; i < 256; i++)
+                  for (int i = 255; i > 0; i--)
                   {
-                        int j = random.NextInt(256);
+                        int j = random.NextInt(i + 1);
                         (permutation[i], permutation[j]) = (permutation[j], permutation[i]);
                   }
 
@@ -66,7 +71,7 @@ namespace UniNoise.Noises
                   public int Octaves;
                   public float Persistence;
                   public float Lacunarity;
-                  public NativeArray<float> NoiseMap;
+                  [NativeDisableParallelForRestriction] public NativeArray<float> NoiseMap;
                   [ReadOnly] public NativeArray<int> Permutation;
 
                   public void Execute(int index)
@@ -77,7 +82,7 @@ namespace UniNoise.Noises
                         float amplitude = 1;
                         float frequency = 1;
                         float noiseHeight = 0;
-                        float maxValue = 0; // Normalization factor
+                        float maxValue = 0;
 
                         for (int i = 0; i < Octaves; i++)
                         {
@@ -93,11 +98,10 @@ namespace UniNoise.Noises
                               frequency *= Lacunarity;
                         }
 
-                        // Normalize the result
-                        noiseHeight = (noiseHeight / maxValue + 1) / 2;
-                        NoiseMap[index] = noiseHeight;
+                        NoiseMap[index] = (noiseHeight / maxValue + 1) * 0.5f;
                   }
 
+                  [MethodImpl(MethodImplOptions.AggressiveInlining)]
                   private static float ImprovedPerlinNoise(float x, float y, NativeArray<int> p)
                   {
                         int xx = (int)math.floor(x) & 255;
@@ -119,16 +123,16 @@ namespace UniNoise.Noises
                         return Lerp(v, Lerp(u, Grad(p[aa], x, y), Grad(p[ba], x - 1, y)), Lerp(u, Grad(p[ab], x, y - 1), Grad(p[bb], x - 1, y - 1)));
                   }
 
+                  [MethodImpl(MethodImplOptions.AggressiveInlining)]
                   private static float Fade(float t)
                   {
                         return t * t * t * (t * (t * 6 - 15) + 10);
                   }
 
-                  private static float Lerp(float t, float a, float b)
-                  {
-                        return math.lerp(a, b, t);
-                  }
+                  [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                  private static float Lerp(float t, float a, float b) => a + t * (b - a);
 
+                  [MethodImpl(MethodImplOptions.AggressiveInlining)]
                   private static float Grad(int hash, float x, float y)
                   {
                         int h = hash & 15;
