@@ -72,7 +72,7 @@ namespace UniNoise.Noises
                   [ReadOnly] public float Lacunarity;
                   [NativeDisableParallelForRestriction] public NativeArray<float> NoiseMap;
                   [ReadOnly] public NativeArray<int> Permutation;
-                  
+
 
                   public void Execute(int index)
                   {
@@ -84,10 +84,13 @@ namespace UniNoise.Noises
                         float noiseHeight = 0;
                         float maxValue = 0;
 
+                        float baseXCoord = x / (float)Width;
+                        float baseYCoord = y / (float)Height;
+
                         for (int i = 0; i < Octaves; i++)
                         {
-                              float xCoord = math.mad(x / (float)Width, Scale * frequency, Offset.x);
-                              float yCoord = math.mad(y / (float)Height, Scale * frequency, Offset.y);
+                              float xCoord = math.mad(baseXCoord, Scale * frequency, Offset.x);
+                              float yCoord = math.mad(baseYCoord, Scale * frequency, Offset.y);
 
                               float perlinValue = ImprovedPerlinNoise(xCoord, yCoord, (uint)Permutation[0]) * 2 - 1;
                               noiseHeight += perlinValue * amplitude;
@@ -112,10 +115,10 @@ namespace UniNoise.Noises
                         float u = Fade(xf);
                         float v = Fade(yf);
 
-                        uint aa = XxHash32((int)(XxHash32(xi, seed) + yi), seed);
-                        uint ab = XxHash32((int)(XxHash32(xi, seed) + yi + 1), seed);
-                        uint ba = XxHash32((int)(XxHash32(xi + 1, seed) + yi), seed);
-                        uint bb = XxHash32((int)(XxHash32(xi + 1, seed) + yi + 1), seed);
+                        uint aa = XxHash32(math.asint(math.mad(xi, 1, seed)) + yi, seed);
+                        uint ab = XxHash32(math.asint(math.mad(xi, 1, seed)) + yi + 1, seed);
+                        uint ba = XxHash32(math.asint(math.mad(xi + 1, 1, seed)) + yi, seed);
+                        uint bb = XxHash32(math.asint(math.mad(xi + 1, 1, seed)) + yi + 1, seed);
 
                         float x1 = math.lerp(Grad((int)aa, xf, yf), Grad((int)ba, xf - 1, yf), u);
                         float x2 = math.lerp(Grad((int)ab, xf, yf - 1), Grad((int)bb, xf - 1, yf - 1), u);
