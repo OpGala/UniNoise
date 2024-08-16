@@ -155,8 +155,8 @@ namespace UniNoise
             public static float[] GetNoise(NoiseConfiguration config)
             {
                   return GetNoise(config.noiseType, config.seed, config.width, config.height, config.scale, config.octaves, config.lacunarity, config.gain, config.persistence, config.amplitude,
-                        config.frequency, config.bias, config.numCells, config.jitter, config.distanceFunction, config.numberOfFeatures, config.orientation, config.aspectRatio, config.phase,
-                        config.kernelSize, config.offset);
+                              config.frequency, config.bias, config.numCells, config.jitter, config.distanceFunction, config.numberOfFeatures, config.orientation, config.aspectRatio, config.phase,
+                              config.kernelSize, config.offset);
             }
 
             /// <summary>
@@ -185,9 +185,9 @@ namespace UniNoise
             /// <param name="offset">The offset for gradient noise. Shifts the noise pattern by the given amount. Default is float2(0.0f, 0.0f).</param>
             /// <returns>An array of floats representing the generated noise map.</returns>
             public static float[] GetNoise(NoiseType type = NoiseType.Perlin, int seed = 1, int width = 256, int height = 256, float scale = 1.0f, int octaves = 1, float lacunarity = 1.0f,
-                  float gain = 0.5f, float persistence = 1.0f, float amplitude = 1.0f, float frequency = 1.0f, float bias = 0.0f, int numCells = 64, float jitter = 1.0f,
-                  DistanceFunction distanceFunction = DistanceFunction.Euclidean, int numberOfFeatures = 1, float orientation = 0.0f, float aspectRatio = 1.0f, float phase = 0.0f, int kernelSize = 3,
-                  float2 offset = default)
+                        float gain = 0.5f, float persistence = 1.0f, float amplitude = 1.0f, float frequency = 1.0f, float bias = 0.0f, int numCells = 64, float jitter = 1.0f,
+                        DistanceFunction distanceFunction = DistanceFunction.Euclidean, int numberOfFeatures = 1, float orientation = 0.0f, float aspectRatio = 1.0f, float phase = 0.0f,
+                        int kernelSize = 3, float2 offset = default)
             {
                   switch (type)
                   {
@@ -195,20 +195,17 @@ namespace UniNoise
                               return PerlinNoise.Generate2D(width, height, scale, seed, offset, octaves, persistence, lacunarity);
 
                         case NoiseType.PerlinFractal:
-                              var perlinFractal = new PerlinFractalNoise(seed, scale, width, height, lacunarity, gain, octaves);
-                              return perlinFractal.Generate();
+                              return PerlinFractalNoise.Generate2D(width, height, scale, seed, lacunarity, gain, octaves);
 
                         case NoiseType.Worley:
                               var worley = new WorleyNoise(seed, width, height, numCells, scale, jitter, distanceFunction, numberOfFeatures);
                               return worley.Generate();
 
                         case NoiseType.Simplex:
-                              var simplex = new SimplexNoise(seed, scale, width, height);
-                              return simplex.Generate();
+                              return SimplexNoise.Generate2D( width,  height,  scale,  seed);
 
                         case NoiseType.SimplexFractal:
-                              var simplexFractal = new SimplexFractalNoise(seed, scale, width, height, octaves, lacunarity, persistence, amplitude, frequency);
-                              return simplexFractal.Generate();
+                              return SimplexFractalNoise.Generate2D(width, height, scale, seed, octaves, lacunarity, persistence, amplitude, frequency);
 
                         case NoiseType.White:
                               var white = new WhiteNoise(seed, width, height, amplitude, bias);
@@ -223,20 +220,17 @@ namespace UniNoise
                               return wavelet.Generate();
 
                         case NoiseType.Fractal:
-                              var fractal = new FractalNoise(seed, scale, width, height, octaves, lacunarity, persistence);
-                              return fractal.Generate();
+                              return FractalNoise.Generate2D(width, height, scale, seed, offset, octaves, persistence, lacunarity);
 
                         case NoiseType.Gradient:
-                              var gradient = new GradientNoise(seed, scale, width, height, amplitude, frequency, offset);
-                              return gradient.Generate();
+                              return GradientNoise.Generate2D(width, height, scale, seed, amplitude, frequency, offset);
 
                         case NoiseType.SparseConvolution:
                               var sparse = new SparseConvolutionNoise(seed, scale, width, height, kernelSize);
                               return sparse.Generate();
 
                         case NoiseType.Gabor:
-                              var gabor = new GaborNoise(seed, scale, width, height, frequency, orientation, aspectRatio, phase, amplitude);
-                              return gabor.Generate();
+                              return GaborNoise.Generate2D(width, height, scale, seed, frequency, orientation, aspectRatio, phase, amplitude);
 
                         default:
                               throw new ArgumentException("Unsupported noise type");
@@ -263,11 +257,11 @@ namespace UniNoise
 
                   var job = new CombineNoiseJob
                   {
-                        NoiseInputs = noiseInputs,
-                        CombinedNoise = combinedNoise,
-                        NoiseCount = noiseCount,
-                        NoiseLength = noiseLength,
-                        Method = method
+                              NoiseInputs = noiseInputs,
+                              CombinedNoise = combinedNoise,
+                              NoiseCount = noiseCount,
+                              NoiseLength = noiseLength,
+                              Method = method
                   };
 
                   JobHandle handle = job.Schedule(noiseLength, 64);
@@ -293,9 +287,11 @@ namespace UniNoise
                   public void Execute(int index)
                   {
                         float combinedValue = NoiseInputs[index];
+
                         for (int i = 1; i < NoiseCount; i++)
                         {
                               float value = NoiseInputs[i * NoiseLength + index];
+
                               switch (Method)
                               {
                                     case CombineMethod.Add:

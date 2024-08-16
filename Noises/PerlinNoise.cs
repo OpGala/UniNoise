@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -9,7 +8,7 @@ namespace UniNoise.Noises
 {
       public static class PerlinNoise
       {
-            [BurstCompile]
+            [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
             public static float[] Generate2D(int width, int height, float scale, int seed, float2 offset, int octaves, float persistence, float lacunarity)
             {
                   var noiseMap = new NativeArray<float>(width * height, Allocator.TempJob);
@@ -36,7 +35,7 @@ namespace UniNoise.Noises
                   return noiseArray;
             }
 
-            [BurstCompile]
+            [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
             private static NativeArray<int> GeneratePermutation(int seed)
             {
                   var random = new Random((uint)seed);
@@ -61,18 +60,19 @@ namespace UniNoise.Noises
                   return permutation;
             }
 
-            [BurstCompile]
+            [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
             private struct Generate2DNoiseJob : IJobParallelFor
             {
-                  public int Width;
-                  public int Height;
-                  public float Scale;
-                  public float2 Offset;
-                  public int Octaves;
-                  public float Persistence;
-                  public float Lacunarity;
+                  [ReadOnly] public int Width;
+                  [ReadOnly] public int Height;
+                  [ReadOnly] public float Scale;
+                  [ReadOnly] public float2 Offset;
+                  [ReadOnly] public int Octaves;
+                  [ReadOnly] public float Persistence;
+                  [ReadOnly] public float Lacunarity;
                   [NativeDisableParallelForRestriction] public NativeArray<float> NoiseMap;
                   [ReadOnly] public NativeArray<int> Permutation;
+
 
                   public void Execute(int index)
                   {
@@ -84,12 +84,15 @@ namespace UniNoise.Noises
                         float noiseHeight = 0;
                         float maxValue = 0;
 
+                        float baseXCoord = x / (float)Width;
+                        float baseYCoord = y / (float)Height;
+
                         for (int i = 0; i < Octaves; i++)
                         {
-                              float xCoord = (x / (float)Width) * Scale * frequency + Offset.x;
-                              float yCoord = (y / (float)Height) * Scale * frequency + Offset.y;
+                              float xCoord = math.mad(baseXCoord, Scale * frequency, Offset.x);
+                              float yCoord = math.mad(baseYCoord, Scale * frequency, Offset.y);
 
-                              float perlinValue = ImprovedPerlinNoise(xCoord, yCoord, Permutation) * 2 - 1;
+                              float perlinValue = ImprovedPerlinNoise(xCoord, yCoord, (uint)Permutation[0]) * 2 - 1;
                               noiseHeight += perlinValue * amplitude;
 
                               maxValue += amplitude;
@@ -98,47 +101,67 @@ namespace UniNoise.Noises
                               frequency *= Lacunarity;
                         }
 
-                        NoiseMap[index] = (noiseHeight / maxValue + 1) * 0.5f;
+                        NoiseMap[index] = (noiseHeight / maxValue + 1) / 2;
                   }
 
-                  [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                  private static float ImprovedPerlinNoise(float x, float y, NativeArray<int> p)
+                  [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
+                  private static float ImprovedPerlinNoise(float x, float y, uint seed)
                   {
-                        int xx = (int)math.floor(x) & 255;
-                        int yy = (int)math.floor(y) & 255;
+                        int xi = (int)math.floor(x);
+                        int yi = (int)math.floor(y);
+                        float xf = x - xi;
+                        float yf = y - yi;
 
-                        x -= math.floor(x);
-                        y -= math.floor(y);
+                        float u = Fade(xf);
+                        float v = Fade(yf);
 
-                        float u = Fade(x);
-                        float v = Fade(y);
+                        uint aa = XxHash32(math.asint(math.mad(xi, 1, seed)) + yi, seed);
+                        uint ab = XxHash32(math.asint(math.mad(xi, 1, seed)) + yi + 1, seed);
+                        uint ba = XxHash32(math.asint(math.mad(xi + 1, 1, seed)) + yi, seed);
+                        uint bb = XxHash32(math.asint(math.mad(xi + 1, 1, seed)) + yi + 1, seed);
 
-                        int a = p[xx] + yy;
-                        int aa = p[a];
-                        int ab = p[a + 1];
-                        int b = p[xx + 1] + yy;
-                        int ba = p[b];
-                        int bb = p[b + 1];
+                        float x1 = math.lerp(Grad((int)aa, xf, yf), Grad((int)ba, xf - 1, yf), u);
+                        float x2 = math.lerp(Grad((int)ab, xf, yf - 1), Grad((int)bb, xf - 1, yf - 1), u);
 
-                        return Lerp(v, Lerp(u, Grad(p[aa], x, y), Grad(p[ba], x - 1, y)), Lerp(u, Grad(p[ab], x, y - 1), Grad(p[bb], x - 1, y - 1)));
+                        return math.lerp(x1, x2, v);
                   }
 
-                  [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                  [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
+                  private static uint XxHash32(int input, uint seed)
+                  {
+                        const uint prime322 = 2_246_822_519U;
+                        const uint prime323 = 3_266_489_917U;
+                        const uint prime324 = 668_265_263U;
+                        const uint prime325 = 374_761_393U;
+
+                        uint h32 = seed + prime325;
+                        h32 += 4U;
+
+                        h32 += (uint)input * prime323;
+                        h32 = ((h32 << 17) | (h32 >> 15)) * prime324;
+
+                        h32 ^= h32 >> 15;
+                        h32 *= prime322;
+                        h32 ^= h32 >> 13;
+                        h32 *= prime323;
+                        h32 ^= h32 >> 16;
+
+                        return h32;
+                  }
+
+                  [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
                   private static float Fade(float t)
                   {
                         return t * t * t * (t * (t * 6 - 15) + 10);
                   }
 
-                  [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                  private static float Lerp(float t, float a, float b) => a + t * (b - a);
-
-                  [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                  [BurstCompile(FloatPrecision.Standard, FloatMode.Fast)]
                   private static float Grad(int hash, float x, float y)
                   {
-                        int h = hash & 15;
-                        float u = h < 8 ? x : y;
-                        float v = h < 4 ? y : 0;
-                        return ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v);
+                        int h = hash & 7;
+                        float u = h < 4 ? x : y;
+                        float v = h < 4 ? y : x;
+                        return ((h & 1) != 0 ? -u : u) + ((h & 2) != 0 ? -2.0f * v : 2.0f * v);
                   }
             }
       }
